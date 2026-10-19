@@ -255,7 +255,7 @@
   const $ = id => document.getElementById(id);
 
   function esc(v) { return String(v ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m])); }
-  function today() { return new Date().toISOString().slice(0, 10); }
+  function today() { const d = new Date(); const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 
   function showLoading(show, text = 'Menghubungkan ke Google Sheets...') {
     const el = $('loadingOverlay');
@@ -337,6 +337,8 @@
       renderNav();
       show('dashboard');
     } catch(err) {
+      S.token = ''; S.user = null; S.data = null;
+      $('appView').classList.add('hidden'); $('loginView').classList.remove('hidden');
       showMsg(err.message || 'Login gagal.');
     } finally {
       showLoading(false);
@@ -352,12 +354,10 @@
   }
 
   async function loadAppData() {
-    try {
-      const d = await call('getAppData', S.token);
-      if (d) S.data = d;
-    } catch(err) {
-      showMsg(err.message);
-    }
+    const d = await call('getAppData', S.token);
+    if (!d) throw Error('Server tidak mengembalikan data aplikasi.');
+    S.data = d;
+    return d;
   }
 
   function renderNav() {
@@ -398,7 +398,8 @@
     const v = S.data.violations || [];
     const vp = v.reduce((sum, r) => sum + Number(r.Poin || 0), 0);
     const isStu = S.user && S.user.role === 'student';
-    const myViol = isStu ? v.filter(x => String(x['Siswa ID']) === String(S.user.id)) : v;
+    const studentId = S.data && S.data.student ? S.data.student.ID : S.user.id;
+    const myViol = isStu ? v.filter(x => String(x['Siswa ID']) === String(studentId)) : v;
     const myPts = myViol.reduce((sum, r) => sum + Number(r.Poin || 0), 0);
 
     $('content').innerHTML = `
@@ -663,6 +664,9 @@
         Status: 'Aktif' 
       };
       if(!d['Nama Siswa'] || !d['Kelas ID']) throw Error('Nama Siswa dan Kelas wajib diisi.');
+      if(!d.Username.trim()) throw Error('Username login siswa wajib diisi.');
+      if(!d.ID && d.Password.length < 5) throw Error('Password siswa baru minimal 5 karakter.');
+      if(d.Password && d.Password.length < 5) throw Error('Password minimal 5 karakter.');
       await call('saveStudent', S.token, d);
       closeModal(); await loadAppData(); students();
     } catch(e) { showMsg(e.message); } finally { showLoading(false); }
@@ -738,7 +742,8 @@
   function trans() {
     if (!S.data) return;
     const isStu = S.user && S.user.role === 'student';
-    const a = (S.data.violations || []).filter(r => isStu ? String(r['Siswa ID']) === String(S.user.id) : true);
+    const studentId = S.data && S.data.student ? S.data.student.ID : S.user.id;
+    const a = (S.data.violations || []).filter(r => isStu ? String(r['Siswa ID']) === String(studentId) : true);
     
     $('content').innerHTML = `
       <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
@@ -820,7 +825,8 @@
     if (!S.data) return;
     try {
       const from = $('rf').value, to = $('rt').value;
-      const v = (S.data.violations || []).filter(x => x.Tanggal >= from && x.Tanggal <= to);
+      if (!from || !to || from > to) throw Error('Rentang tanggal laporan tidak valid.');
+      const v = (S.data.violations || []).filter(x => String(x.Tanggal).slice(0,10) >= from && String(x.Tanggal).slice(0,10) <= to);
       const sum = v.reduce((n, r) => n + Number(r.Poin), 0);
       
       $('rr').innerHTML = `
@@ -1270,16 +1276,12 @@
 
   async function saveGasUrl() {
     const url = $('sUrl').value.trim();
-    localStorage.setItem('gas_url', url);
-    showLoading(true, 'Menyimpan URL...');
-    try {
-      await call('saveSettings', S.token, { gas_url: url });
-      showMsg('URL Google Apps Script berhasil disimpan!');
-    } catch(e) {
-      showMsg('URL tersimpan secara lokal.');
-    } finally {
-      showLoading(false);
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[^\s]+\/exec(?:\?.*)?$/.test(url)) {
+      showMsg('URL tidak valid. Gunakan URL Web App Google Apps Script yang berakhiran /exec.');
+      return;
     }
+    localStorage.setItem('gas_url', url);
+    showMsg('URL Google Apps Script disimpan di browser ini. Muat ulang halaman untuk menguji koneksi.');
   }
 
   async function saveSet() {
