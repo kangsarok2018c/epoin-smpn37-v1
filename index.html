@@ -765,18 +765,45 @@
     const ms = S.data.violationMasters || [];
     const cats = [...new Set(ms.map(x => String(x.Kategori || 'Lainnya')))].sort((x, y) => getRomanVal(x) - getRomanVal(y));
     const opts = cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    const stuOpts = (S.data.students||[]).map(x => `<option value="${x.ID}">${esc(x['Nama Siswa'])} - ${esc(x.class_name)}</option>`).join('');
+    const kelasOpts = (S.data.classes || []).map(x => `<option value="${esc(x.ID)}">${esc(x['Nama Kelas'])}</option>`).join('');
     
     modal('Catat Pelanggaran', `
       <div class="field"><label>Tanggal</label><input id="td" type="date" value="${today()}"></div>
-      <div class="field"><label>Siswa</label><select id="ts">${stuOpts}</select></div>
+      <div class="field"><label>Kelas</label><select id="tkelas" onchange="filterSiswaByKelas()"><option value="">Pilih Kelas Terlebih Dahulu</option>${kelasOpts}</select></div>
+      <div class="field"><label>Siswa</label><select id="ts" disabled><option value="">Pilih kelas terlebih dahulu</option></select></div>
       <div class="field"><label>Kategori Pelanggaran</label><select id="tc" onchange="filterPel()"><option value="">Semua Kategori</option>${opts}</select></div>
       <div class="field"><label>Jenis Pelanggaran</label><select id="tm" onchange="updPel()"></select></div>
       <div id="pointInfo" style="margin-top:6px;padding:9px;background:#fee2e2;color:#b91c1c;border-radius:8px;font-weight:bold;text-align:center;">Pilih jenis pelanggaran</div>
       <div class="field"><label>Keterangan Tambahan</label><textarea id="tk"></textarea></div>
     `, `<button class="btn light" onclick="closeModal()">Batal</button> <button class="btn danger" onclick="saveTr()">Simpan</button>`);
     
-    window._violationMasters = ms; filterPel();
+    window._violationMasters = ms;
+    window._violationStudents = S.data.students || [];
+    filterSiswaByKelas();
+    filterPel();
+  }
+
+  function filterSiswaByKelas() {
+    const kelasSelect = $('tkelas');
+    const siswaSelect = $('ts');
+    if (!kelasSelect || !siswaSelect) return;
+
+    const kelasId = String(kelasSelect.value || '');
+    // Reset pilihan setiap kelas berubah agar siswa dari kelas sebelumnya tidak terbawa.
+    siswaSelect.value = '';
+    if (!kelasId) {
+      siswaSelect.innerHTML = '<option value="">Pilih kelas terlebih dahulu</option>';
+      siswaSelect.disabled = true;
+      return;
+    }
+
+    const siswa = (window._violationStudents || []).filter(x =>
+      String(x['Kelas ID'] ?? x['KelasID'] ?? x.class_id ?? '') === kelasId
+    );
+    siswaSelect.innerHTML = siswa.length
+      ? '<option value="">Pilih Siswa</option>' + siswa.map(x => `<option value="${esc(x.ID)}">${esc(x['Nama Siswa'])}${x.NIS ? ' - NIS: ' + esc(x.NIS) : ''}</option>`).join('')
+      : '<option value="">Tidak ada siswa di kelas ini</option>';
+    siswaSelect.disabled = siswa.length === 0;
   }
 
   function filterPel() {
@@ -794,7 +821,9 @@
     showLoading(true, 'Menyimpan pelanggaran...');
     try {
       const d = { 'Tanggal': $('td').value, 'Siswa ID': $('ts').value, 'Master ID': $('tm').value, 'Keterangan': $('tk').value };
-      if(!d['Siswa ID'] || !d['Master ID']) throw Error('Siswa dan pelanggaran wajib dipilih.');
+      if(!$('tkelas').value) throw Error('Kelas wajib dipilih terlebih dahulu.');
+      if(!d['Siswa ID']) throw Error('Pilih siswa dari kelas yang dipilih.');
+      if(!d['Master ID']) throw Error('Jenis pelanggaran wajib dipilih.');
       await call('saveViolation', S.token, d);
       closeModal(); await loadAppData(); trans();
     } catch(e) { showMsg(e.message); } finally { showLoading(false); }
