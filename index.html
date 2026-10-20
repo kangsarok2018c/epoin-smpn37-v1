@@ -747,20 +747,35 @@
   function trForm() {
     if (!S.data) return;
     const ms = S.data.violationMasters || [];
+    const classes = S.data.classes || [];
+    const students = S.data.students || [];
+
     const cats = [...new Set(ms.map(x => String(x.Kategori || 'Lainnya')))].sort((x, y) => getRomanVal(x) - getRomanVal(y));
     const opts = cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    const stuOpts = (S.data.students||[]).map(x => `<option value="${x.ID}">${esc(x['Nama Siswa'])} - ${esc(x.class_name)}</option>`).join('');
+    const classOpts = classes.map(c => `<option value="${c.ID}">${esc(c['Nama Kelas'])}</option>`).join('');
     
     modal('Catat Pelanggaran', `
       <div class="field"><label>Tanggal</label><input id="td" type="date" value="${today()}"></div>
-      <div class="field"><label>Siswa</label><select id="ts">${stuOpts}</select></div>
+      <div class="field"><label>Pilih Kelas</label><select id="tc_class" onchange="filterStudentsByClass()"><option value="">-- Pilih Kelas --</option>${classOpts}</select></div>
+      <div class="field"><label>Siswa</label><select id="ts"><option value="">-- Pilih Kelas Terlebih Dahulu --</option></select></div>
       <div class="field"><label>Kategori Pelanggaran</label><select id="tc" onchange="filterPel()"><option value="">Semua Kategori</option>${opts}</select></div>
       <div class="field"><label>Jenis Pelanggaran</label><select id="tm" onchange="updPel()"></select></div>
       <div id="pointInfo" style="margin-top:6px;padding:9px;background:#fee2e2;color:#b91c1c;border-radius:8px;font-weight:bold;text-align:center;">Pilih jenis pelanggaran</div>
       <div class="field"><label>Keterangan Tambahan</label><textarea id="tk"></textarea></div>
     `, `<button class="btn light" onclick="closeModal()">Batal</button> <button class="btn danger" onclick="saveTr()">Simpan</button>`);
     
-    window._violationMasters = ms; filterPel();
+    window._violationMasters = ms;
+    window._allStudents = students;
+    filterPel();
+  }
+
+  function filterStudentsByClass() {
+    const classId = $('tc_class')?.value || '';
+    const selStu = $('ts');
+    if (!selStu) return;
+    const allStu = window._allStudents || [];
+    const filtered = allStu.filter(s => String(s['Kelas ID']) === String(classId));
+    selStu.innerHTML = filtered.length ? filtered.map(x => `<option value="${x.ID}">${esc(x['Nama Siswa'])} (NIS: ${esc(x.NIS)})</option>`).join('') : '<option value="">Tidak ada siswa di kelas ini</option>';
   }
 
   function filterPel() {
@@ -987,7 +1002,7 @@
                   <td><span style="padding:4px 8px;border-radius:6px;background:#fee2e2;color:${badgeColor};font-weight:bold;font-size:12px;">${status}</span></td>
                   <td><input type="text" id="no_surat_${r.ID}" value="${defaultNo}" style="padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; width:180px; font-size:12px;"></td>
                   <td>
-                    <button class="btn primary" style="padding:6px 12px;font-size:12px;" onclick="printSP('${r.ID}')">🖨 Cetak Surat</button>
+                    <button class="btn primary" style="padding:6px 12px;font-size:12px;" onclick="previewSP('${r.ID}')">👁 Preview & Cetak</button>
                   </td>
                 </tr>
               `;
@@ -998,17 +1013,16 @@
     `;
   }
 
-  function printSP(studentId) {
-    if (!S.data) return;
+  function getSpLetterData(studentId) {
     const students = S.data.students || [], violations = S.data.violations || [], classes = S.data.classes || [];
     const st = students.find(x => String(x.ID) === String(studentId));
-    if (!st) { showMsg('Data siswa tidak ditemukan.'); return; }
+    if (!st) throw Error('Data siswa tidak ditemukan.');
 
     const my = violations
       .filter(x => String(x['Siswa ID']) === String(studentId))
       .sort((a, b) => String(a.Tanggal || '').localeCompare(String(b.Tanggal || '')));
     const total = my.reduce((n, x) => n + Number(x.Poin || 0), 0);
-    if (total < 20) { showMsg('Siswa belum mencapai batas Surat Peringatan.'); return; }
+    if (total < 20) throw Error('Siswa belum mencapai batas Surat Peringatan.');
 
     let level = 'SP I', batas = '20-30';
     if (total >= 100) { level = 'SP IV (Akhir)'; batas = '≥100'; }
@@ -1021,6 +1035,7 @@
     const logoKanan = settings.logo_kanan || 'https://placehold.co/75x84/png?text=TutWuri';
     const kepala = settings.kepala_sekolah || 'Drs. H. Ahmad, M.Pd';
     const nipKepala = settings.nip_kepala_sekolah || '196502032001011001';
+    
     const customNoInput = $(`no_surat_${studentId}`);
     const nomor = customNoInput ? customNoInput.value : ('421.3/SP-4/SMPN.37/' + new Date().getFullYear());
 
@@ -1036,109 +1051,111 @@
     const tanggalSurat = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
     const lokasi = 'Pulau Rengas';
 
-    const rows = my.map((x, i) => `<div style="display:flex;gap:6px;margin:0 0 2px;"><span style="width:18px;flex:none;text-align:right">${i+1}.</span><span>${esc(x.Tanggal||'')} - ${esc(x.master_name||'')} (${Number(x.Poin||0)} poin)</span></div>`).join('');
+    const rows = my.map((x, i) => `<div style="display:flex;gap:6px;margin:0 0 3px;"><span style="width:20px;flex:none;text-align:right">${i+1}.</span><span>${esc(x.Tanggal||'')} - ${esc(x.master_name||'')} (${Number(x.Poin||0)} poin)</span></div>`).join('');
 
     let pembuka = '', tanda = '';
     if (level === 'SP I') {
       pembuka = 'Dengan ini sekolah memberikan Surat Peringatan I kepada siswa tersebut sebagai pembinaan atas pelanggaran tata tertib sekolah.';
-      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:30px;table-layout:fixed"><tr><td style="width:50%;text-align:center">Wali Kelas<div style="height:75px"></div><div style="text-decoration:underline">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td style="width:50%;text-align:center">Siswa<div style="font-size:8pt;color:#666;height:15px">Materai Rp 10.000</div><div style="height:60px"></div><div style="text-decoration:underline">${esc(st['Nama Siswa'])}</div></td></tr></table>`;
+      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:25px;table-layout:fixed"><tr><td style="width:50%;text-align:center;vertical-align:top">Wali Kelas<div style="height:60px"></div><div style="text-decoration:underline;font-weight:bold">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td style="width:50%;text-align:center;vertical-align:top">Siswa<div style="font-size:8pt;color:#666;height:12px">Materai Rp 10.000</div><div style="height:45px"></div><div style="text-decoration:underline;font-weight:bold">${esc(st['Nama Siswa'])}</div></td></tr></table>`;
     } else if (level === 'SP II') {
       pembuka = 'Dengan ini sekolah memberikan Surat Peringatan II kepada siswa tersebut sebagai tindak lanjut pembinaan karena akumulasi poin pelanggaran yang telah mencapai batas Surat Peringatan II.';
-      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:26px;table-layout:fixed"><tr><td style="width:50%;text-align:center">Guru BP/BK<div style="height:75px"></div><div style="text-decoration:underline">${esc(guruBp)}</div><div>NIP. ${esc(nipBp)}</div></td><td style="width:50%;text-align:center">Siswa<div style="font-size:8pt;color:#666;height:15px">Materai Rp 10.000</div><div style="height:60px"></div><div style="text-decoration:underline">${esc(st['Nama Siswa'])}</div></td></tr><tr><td style="text-align:center;padding-top:20px">Wali Kelas<div style="height:75px"></div><div style="text-decoration:underline">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td style="text-align:center;padding-top:20px">Orang Tua/Wali<div style="height:90px"></div><div style="text-decoration:underline">${esc(orangTua)}</div></td></tr></table>`;
+      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:20px;table-layout:fixed"><tr><td style="width:50%;text-align:center;vertical-align:top">Guru BP/BK<div style="height:55px"></div><div style="text-decoration:underline;font-weight:bold">${esc(guruBp)}</div><div>NIP. ${esc(nipBp)}</div></td><td style="width:50%;text-align:center;vertical-align:top">Siswa<div style="font-size:8pt;color:#666;height:12px">Materai Rp 10.000</div><div style="height:45px"></div><div style="text-decoration:underline;font-weight:bold">${esc(st['Nama Siswa'])}</div></td></tr><tr><td style="text-align:center;vertical-align:top;padding-top:15px">Wali Kelas<div style="height:55px"></div><div style="text-decoration:underline;font-weight:bold">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td style="text-align:center;vertical-align:top;padding-top:15px">Orang Tua/Wali<div style="height:70px"></div><div style="text-decoration:underline;font-weight:bold">${esc(orangTua)}</div></td></tr></table>`;
     } else if (level === 'SP III') {
       pembuka = 'Dengan ini sekolah memberikan Surat Peringatan III kepada siswa tersebut sebagai tindak lanjut pembinaan atas akumulasi pelanggaran yang telah mencapai batas Surat Peringatan III.';
-      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:26px;table-layout:fixed"><tr><td style="width:50%;text-align:center">Wali Kelas<div style="height:75px"></div><div style="text-decoration:underline">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td style="width:50%;text-align:center">Guru BP/BK<div style="height:75px"></div><div style="text-decoration:underline">${esc(guruBp)}</div><div>NIP. ${esc(nipBp)}</div></td></tr><tr><td style="text-align:center;padding-top:18px">Pembina Osis<div style="height:75px"></div><div style="text-decoration:underline">Rahmat Jaidi</div><div>NIP. 196502032001011001</div></td><td style="text-align:center;padding-top:18px">Siswa<div style="font-size:8pt;color:#666;height:15px">Materai Rp 10.000</div><div style="height:60px"></div><div style="text-decoration:underline">${esc(st['Nama Siswa'])}</div></td></tr></table>`;
+      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:20px;table-layout:fixed"><tr><td style="width:50%;text-align:center;vertical-align:top">Wali Kelas<div style="height:55px"></div><div style="text-decoration:underline;font-weight:bold">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td style="width:50%;text-align:center;vertical-align:top">Guru BP/BK<div style="height:55px"></div><div style="text-decoration:underline;font-weight:bold">${esc(guruBp)}</div><div>NIP. ${esc(nipBp)}</div></td></tr><tr><td style="text-align:center;vertical-align:top;padding-top:12px">Pembina Osis<div style="height:55px"></div><div style="text-decoration:underline;font-weight:bold">Rahmat Jaidi</div><div>NIP. 196502032001011001</div></td><td style="text-align:center;vertical-align:top;padding-top:12px">Siswa<div style="font-size:8pt;color:#666;height:12px">Materai Rp 10.000</div><div style="height:45px"></div><div style="text-decoration:underline;font-weight:bold">${esc(st['Nama Siswa'])}</div></td></tr></table>`;
     } else {
       pembuka = 'Dengan ini sekolah memberikan Surat Peringatan IV (Akhir) kepada siswa tersebut karena akumulasi poin pelanggaran telah mencapai batas Surat Peringatan IV. Surat ini merupakan peringatan terakhir.';
-      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:20px;table-layout:fixed"><tr><td style="width:50%;text-align:center">Waka Kesiswaan<div style="height:70px"></div><div style="text-decoration:underline">${esc(wakaKesiswaan)}</div><div>NIP. ${esc(nipWaka)}</div></td><td style="width:50%;text-align:center">Siswa<div style="font-size:8pt;color:#666;height:15px">Materai Rp 10.000</div><div style="height:55px"></div><div style="text-decoration:underline">${esc(st['Nama Siswa'])}</div></td></tr><tr><td style="text-align:center;padding-top:10px">Guru BP/BK<div style="height:70px"></div><div style="text-decoration:underline">${esc(guruBp)}</div><div>NIP. ${esc(nipBp)}</div></td><td style="text-align:center;padding-top:10px">Orang Tua/Wali<div style="height:85px"></div><div style="text-decoration:underline">${esc(orangTua)}</div></td></tr><tr><td style="text-align:center;padding-top:10px">Wali Kelas<div style="height:70px"></div><div style="text-decoration:underline">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td></td></tr><tr><td colspan="2" style="text-align:center;padding-top:15px">Mengetahui,<br>Kepala SMP Negeri 37 Merangin<div style="height:75px"></div><div style="text-decoration:underline">${esc(kepala)}</div><div>NIP. ${esc(nipKepala)}</div></td></tr></table>`;
+      tanda = `<table style="width:100%;border-collapse:collapse;margin-top:12px;table-layout:fixed"><tr><td style="width:50%;text-align:center;vertical-align:top">Waka Kesiswaan<div style="height:50px"></div><div style="text-decoration:underline;font-weight:bold">${esc(wakaKesiswaan)}</div><div>NIP. ${esc(nipWaka)}</div></td><td style="width:50%;text-align:center;vertical-align:top">Siswa<div style="font-size:8pt;color:#666;height:10px">Materai Rp 10.000</div><div style="height:40px"></div><div style="text-decoration:underline;font-weight:bold">${esc(st['Nama Siswa'])}</div></td></tr><tr><td style="text-align:center;vertical-align:top;padding-top:8px">Guru BP/BK<div style="height:50px"></div><div style="text-decoration:underline;font-weight:bold">${esc(guruBp)}</div><div>NIP. ${esc(nipBp)}</div></td><td style="text-align:center;vertical-align:top;padding-top:8px">Orang Tua/Wali<div style="height:60px"></div><div style="text-decoration:underline;font-weight:bold">${esc(orangTua)}</div></td></tr><tr><td style="text-align:center;vertical-align:top;padding-top:8px">Wali Kelas<div style="height:50px"></div><div style="text-decoration:underline;font-weight:bold">${esc(waliKelas)}</div><div>NIP. ${esc(nipWali)}</div></td><td></td></tr><tr><td colspan="2" style="text-align:center;vertical-align:top;padding-top:8px">Mengetahui,<br>Kepala SMP Negeri 37 Merangin<div style="height:55px"></div><div style="text-decoration:underline;font-weight:bold">${esc(kepala)}</div><div>NIP. ${esc(nipKepala)}</div></td></tr></table>`;
     }
 
+    return {
+      title: `${level} - ${esc(st['Nama Siswa'])}`,
+      htmlContent: `
+        <div class="sheet" id="printArea" style="width:210mm; min-height:297mm; padding:15mm 20mm; margin:0 auto; background:#fff; font-family:'Times New Roman', Times, serif; font-size:12pt; line-height:1.2; color:#000;">
+          <div class="kop" style="width:100%; border-bottom:2px solid #000; padding-bottom:6px; margin-bottom:15mm;">
+            <table style="width:100%; border-collapse:collapse;">
+              <tr>
+                <td style="width:15%; text-align:left; vertical-align:middle;"><img src="${logoKiri}" style="max-width:75px; max-height:84px; object-fit:scale-down;" onerror="this.src='https://placehold.co/75x84'" /></td>
+                <td style="width:70%; text-align:center; vertical-align:middle;">
+                  <div style="font-size:15pt; font-weight:bold; line-height:1.1;">PEMERINTAH KABUPATEN MERANGIN</div>
+                  <div style="font-size:14pt; font-weight:bold; line-height:1.1;">DINAS PENDIDIKAN DAN KEBUDAYAAN</div>
+                  <div style="font-size:13pt; font-weight:bold; line-height:1.15;">SMP NEGERI 37 MERANGIN</div>
+                  <div style="font-size:10pt; font-weight:normal; margin-top:3px;">${esc(alamat)}</div>
+                </td>
+                <td style="width:15%; text-align:right; vertical-align:middle;"><img src="${logoKanan}" style="max-width:75px; max-height:84px; object-fit:scale-down;" onerror="this.src='https://placehold.co/75x84'" /></td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="text-align:center; margin-bottom:20px;">
+            <h2 style="font-size:14pt; font-weight:bold; text-decoration:underline; margin:0 0 4px 0;">SURAT PERINGATAN ${level}</h2>
+            <div style="font-size:12pt;">Nomor: ${esc(nomor)}</div>
+          </div>
+
+          <div style="margin-bottom:15px; text-align:left;">Yang bertanda tangan di bawah ini menerangkan bahwa:</div>
+
+          <div style="margin-left:40px; margin-bottom:15px;">
+            <table style="border-collapse:collapse; width:100%;">
+              <tr><td style="width:180px; padding:2px 0; vertical-align:top;">Nama Siswa</td><td style="width:15px; vertical-align:top;">:</td><td style="vertical-align:top;"><b>${esc(st['Nama Siswa'])}</b></td></tr>
+              <tr><td style="padding:2px 0; vertical-align:top;">NIS</td><td style="vertical-align:top;">:</td><td style="vertical-align:top;">${esc(st.NIS||'')}</td></tr>
+              <tr><td style="padding:2px 0; vertical-align:top;">NISN</td><td style="vertical-align:top;">:</td><td style="vertical-align:top;">${esc(st.NISN||'')}</td></tr>
+              <tr><td style="padding:2px 0; vertical-align:top;">Kelas</td><td style="vertical-align:top;">:</td><td style="vertical-align:top;">${esc(st.class_name||'')}</td></tr>
+              <tr><td style="padding:2px 0; vertical-align:top;">Total Poin Pelanggaran</td><td style="vertical-align:top;">:</td><td style="vertical-align:top; font-weight:bold;">${total} Poin (Batas SP: ${batas})</td></tr>
+            </table>
+          </div>
+
+          <div style="margin-bottom:6px; font-weight:bold;">Rincian Pelanggaran:</div>
+          <div style="margin-left:40px; margin-bottom:18px;">${rows||'<div>1. -</div>'}</div>
+
+          <div style="margin-bottom:15px; text-align:justify;">${pembuka}</div>
+          <div style="margin-bottom:20px; text-align:justify;">Demikian surat peringatan ini dibuat untuk dapat diperhatikan dan dilaksanakan sebagaimana mestinya.</div>
+          
+          <div style="text-align:right; margin-bottom:15px; padding-right:20px;">${esc(lokasi)}, ${esc(tanggalSurat)}</div>
+          ${tanda}
+        </div>
+      `
+    };
+  }
+
+  function previewSP(studentId) {
+    try {
+      const data = getSpLetterData(studentId);
+      modal(data.title, `
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:15px; max-height:65vh; overflow:auto; display:flex; justify-content:center;">
+          <div style="transform: scale(0.85); transform-origin: top center;">
+            ${data.htmlContent}
+          </div>
+        </div>
+      `, `
+        <button class="btn light" onclick="closeModal()">Tutup</button>
+        <button class="btn danger" onclick="execSavePdf('${data.title}')">Simpan PDF</button>
+        <button class="btn primary" onclick="execPrintHtml()">Cetak Dokumen</button>
+      `);
+      window._currentPrintHtml = data.htmlContent;
+    } catch(e) {
+      showMsg(e.message);
+    }
+  }
+
+  function execPrintHtml() {
+    const html = window._currentPrintHtml;
     const w = window.open('', '_blank', 'width=900,height=1100');
-    if (!w) { showMsg('Pop-up diblokir browser. Izinkan pop-up untuk mencetak surat.'); return; }
-
-    w.document.write(`<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>${level} - ${esc(st['Nama Siswa'])}</title><style>
-      @page{size:A4 portrait;margin:13mm 13mm 12mm 13mm}
-      *{box-sizing:border-box}
-      html,body{margin:0;padding:0;background:#fff;color:#000}
-      body{font-family:"Times New Roman",Times,serif;font-size:12pt;line-height:1.18}
-      .sheet{width:100%;max-width:210mm;margin:0 auto;background:#fff;padding:10px}
-      .kop{width:100%;border-bottom:2px solid #000;padding:0 0 5px;margin:0 0 17mm}
-      .kop-table{width:100%;border-collapse:collapse}
-      .kop-table td{border:0;padding:0;vertical-align:middle}
-      .logo-cell{width:15%;text-align:center;vertical-align:middle}
-      .logo{max-width:75px;max-height:84px;width:auto;height:auto;object-fit:scale-down;display:inline-block}
-      .kop-center{text-align:center;width:70%;white-space:nowrap}
-      .kop-center .l1{font-size:16pt;font-weight:bold;line-height:1.02}
-      .kop-center .l2{font-size:15pt;font-weight:bold;line-height:1.02}
-      .kop-center .l3{font-size:14pt;font-weight:bold;line-height:1.08}
-      .kop-center .alamat{font-size:11pt;line-height:1.1;margin-top:4px}
-      .judul{text-align:center;margin:0 0 24px}
-      .judul h2{font-size:14pt;font-weight:normal;text-decoration:underline;margin:0 0 3px}
-      .judul .nomor{font-size:12pt}
-      .pembuka{margin:0 0 16px;text-align:left}
-      .identitas{margin-left:70px;margin-bottom:15px}
-      .identitas table{border-collapse:collapse;width:auto}
-      .identitas td{padding:1px 0;vertical-align:top}
-      .identitas .label{width:190px}
-      .identitas .colon{width:16px}
-      .total{font-weight:bold}
-      .rincian-title{margin:0 0 4px}
-      .rincian{margin-left:70px;margin-bottom:18px}
-      .isi{margin:0 0 16px;text-align:justify}
-      .tanggal{text-align:right;margin-top:20px;margin-bottom:0;padding-right:24px}
-      .printbar{position:fixed;right:20px;top:20px;display:flex;gap:10px;z-index:999}
-      .printbtn{padding:10px 18px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer;font-family:Arial,sans-serif;font-weight:bold}
-      .pdfbtn{padding:10px 18px;border:0;border-radius:6px;background:#dc2626;color:#fff;cursor:pointer;font-family:Arial,sans-serif;font-weight:bold}
-      @media print{.printbar{display:none}}
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
-    </head><body>
-      <div class="printbar">
-        <button class="printbtn" onclick="window.print()">Cetak Dokumen</button>
-        <button class="pdfbtn" onclick="savePdf()">Simpan PDF</button>
-      </div>
-      <div class="sheet" id="printArea">
-        <div class="kop"><table class="kop-table"><tr>
-          <td class="logo-cell"><img class="logo" src="${logoKiri}" onerror="this.src='https://placehold.co/75x84'" /></td>
-          <td class="kop-center"><div class="l1">PEMERINTAH KABUPATEN MERANGIN</div><div class="l2">DINAS PENDIDIKAN DAN KEBUDAYAAN</div><div class="l3">SMP NEGERI 37 MERANGIN</div><div class="alamat">${alamat}</div></td>
-          <td class="logo-cell"><img class="logo" src="${logoKanan}" onerror="this.src='https://placehold.co/75x84'" /></td>
-        </tr></table></div>
-
-        <div class="judul"><h2>SURAT PERINGATAN ${level}</h2><div class="nomor">Nomor: ${esc(nomor)}</div></div>
-        <p class="pembuka">Yang bertanda tangan di bawah ini menerangkan bahwa:</p>
-
-        <div class="identitas"><table>
-          <tr><td class="label">Nama Siswa</td><td class="colon">:</td><td><b>${esc(st['Nama Siswa'])}</b></td></tr>
-          <tr><td class="label">NIS</td><td class="colon">:</td><td>${esc(st.NIS||'')}</td></tr>
-          <tr><td class="label">NISN</td><td class="colon">:</td><td>${esc(st.NISN||'')}</td></tr>
-          <tr><td class="label">Kelas</td><td class="colon">:</td><td>${esc(st.class_name||'')}</td></tr>
-          <tr><td class="label">Total Poin Pelanggaran</td><td class="colon">:</td><td class="total">${total} Poin (Batas SP: ${batas})</td></tr>
-        </table></div>
-
-        <div class="rincian-title"><b>Rincian Pelanggaran:</b></div>
-        <div class="rincian">${rows||'<div>1. -</div>'}</div>
-
-        <p class="isi">${pembuka}</p>
-        <p class="isi">Demikian surat peringatan ini dibuat untuk dapat diperhatikan dan dilaksanakan sebagaimana mestinya.</p>
-        <div class="tanggal">${esc(lokasi)}, ${esc(tanggalSurat)}</div>
-        ${tanda}
-      </div>
-      <script>
-        function savePdf() {
-          const element = document.getElementById('printArea');
-          const opt = {
-            margin:       10,
-            filename:     'Surat_${level.replace(/[^a-zA-Z0-9]/g, '_')}_${esc(st['Nama Siswa'])}.pdf',
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true },
-            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-          };
-          html2pdf().from(element).set(opt).save();
-        }
-      <\/script>
-    </body></html>`);
+    if (!w) { showMsg('Pop-up diblokir browser.'); return; }
+    w.document.write(`<!DOCTYPE html><html lang="id"><head><meta charset="UTF-8"><title>Cetak Surat</title><style>@page{size:A4 portrait;margin:10mm}body{margin:0;background:#fff}</style></head><body>${html}<script>window.print();<\/script></body></html>`);
     w.document.close();
-    w.focus();
+  }
+
+  function execSavePdf(title) {
+    const container = document.createElement('div');
+    container.innerHTML = window._currentPrintHtml;
+    const opt = {
+      margin:       10,
+      filename:     title.replace(/[^a-zA-Z0-9]/g, '_') + '.pdf',
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+    html2pdf().from(container.firstElementChild).set(opt).save();
   }
 
   function passwordView() {
@@ -1250,8 +1267,8 @@
         img.src = base64;
         img.onload = function() {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 200;
-          const MAX_HEIGHT = 200;
+          const MAX_WIDTH = 150;
+          const MAX_HEIGHT = 150;
           let width = img.width;
           let height = img.height;
           if (width > height) {
@@ -1262,8 +1279,10 @@
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
           ctx.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
           
           if (type === 'logoKiri') {
             $('valLogoKiri').value = compressedBase64;
